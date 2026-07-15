@@ -14,6 +14,7 @@ import torch
 import transformers
 
 import jlens
+from jlens import examples as jlens_examples
 from jlens.lens import JacobianLens
 from jlens.vis import SliceData, build_page, compute_slice
 
@@ -25,6 +26,7 @@ __all__ = [
     "fit_lens",
     "load_lens",
     "load_model",
+    "load_wikitext_prompts",
     "merge_lens_files",
     "render_slice_page",
     "slice_for_prompt",
@@ -41,6 +43,12 @@ _GATED_MSG = (
     "Model {model_id!r} is gated on the HuggingFace Hub. Run "
     "`huggingface-cli login`, accept the license on "
     "https://huggingface.co/{model_id}, then retry."
+)
+
+_NO_DATASETS_MSG = (
+    "streaming WikiText-103 needs the `datasets` package, which is not "
+    "installed. Run `uv sync --extra wikitext` from the app/ directory, or "
+    "fit on a local corpus with `--prompt-source file`."
 )
 
 
@@ -100,6 +108,16 @@ def fit_lens(
         max_seq_len=max_seq_len,
         dim_batch=dim_batch,
     )
+
+
+def load_wikitext_prompts(n_prompts: int, *, min_chars: int = 600) -> list[str]:
+    """Stream ``n_prompts`` WikiText-103 records of at least ``min_chars``
+    characters from the HuggingFace Hub. Needs the ``wikitext`` extra and
+    network access."""
+    try:
+        return jlens_examples.load_wikitext_prompts(n_prompts, min_chars=min_chars)
+    except ImportError as exc:
+        raise RuntimeError(_NO_DATASETS_MSG) from exc
 
 
 def load_lens(name_or_path: str, *, filename: str = "lens.pt") -> JacobianLens:

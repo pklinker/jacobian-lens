@@ -17,6 +17,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Only needed for --prompt-source wikitext/mixed, which streams the corpus
+# from the Hub; the default file source has no extra dependency.
+wikitext = ["datasets>=2.14"]
 
 [project.scripts]
 jlens-fit = "jlens_inspector.fit_cli:main"

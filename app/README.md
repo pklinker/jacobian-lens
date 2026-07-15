@@ -49,6 +49,47 @@ dims per backward pass), `--checkpoint` (default `<out>.ckpt`). Fitting is
 checkpointed after every prompt — re-running the same command resumes where
 an interrupted fit stopped.
 
+`--max-prompts` caps the corpus in every mode, and it defaults to **200**.
+`data/prompts.txt` ships with 324 lines, so the command above fits on the
+first 200 and ignores the rest; pass `--max-prompts 324` to use all of them.
+
+### Corpus source
+
+`J_l` is an expectation over a generic web-text corpus, so what you fit on
+shapes the lens. `--prompt-source` selects where the corpus comes from:
+
+| Source | Corpus |
+| --- | --- |
+| `file` (default) | `--prompts` only — full control, narrower distribution |
+| `wikitext` | WikiText-103 streamed from the Hub — closest to pretraining text |
+| `mixed` | both, in a `--wikitext-fraction` split (default 0.5) |
+
+```bash
+# half hand-written prompts, half WikiText-103
+uv run python fit_lens.py --model Qwen/Qwen2.5-0.5B \
+  --prompts data/prompts.txt --prompt-source mixed \
+  --wikitext-fraction 0.5 --max-prompts 1000
+```
+
+`--max-prompts` is the total either way. Under `mixed`, if the file holds
+fewer lines than its share (324 lines against a 500-line share of 1000), the
+shortfall is drawn from WikiText so the corpus still reaches the total.
+
+The mixed corpus is shuffled rather than concatenated, so that an interrupted
+fit has still seen both sources. The shuffle is seeded (`--seed`, default 0)
+because resume replays the prompt list by index: **the checkpoint records the
+fit geometry but not the corpus**, so resuming after changing `--seed`,
+`--prompt-source`, `--wikitext-fraction`, or the contents of `--prompts` will
+silently average over a different set of prompts than the run it resumes.
+Delete the `.ckpt` when you change any of them.
+
+`wikitext` and `mixed` stream from the Hub, so they need network and the
+`datasets` package, which is not part of the default install:
+
+```bash
+uv sync --extra wikitext
+```
+
 The default model is `Qwen/Qwen2.5-3B` (a 2–4B class decoder). Fitting needs
 gradient-capable VRAM, roughly 3–4x the bf16 weight size; the CLI prints an
 estimate and warns above 9B params.

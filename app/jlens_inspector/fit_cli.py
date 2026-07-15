@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+import random
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-3B"
 LARGE_MODEL_PARAMS = 9e9
+
+PROMPT_SOURCES = ("file", "wikitext", "mixed")
 
 QUANTIZED_FLAGS_MSG = (
     "quantized loading (--load-in-4bit/--load-in-8bit) is refused: "
@@ -41,6 +44,60 @@ def load_prompts(path: Path, max_prompts: int) -> list[str]:
     return prompts
 
 
+def build_corpus(
+    source: str,
+    prompts_path: Path | None,
+    max_prompts: int,
+    *,
+    wikitext_fraction: float = 0.5,
+    seed: int = 0,
+    wikitext_loader: Callable[[int], list[str]] | None = None,
+) -> list[str]:
+    """Assemble the fit corpus from ``--prompts``, WikiText-103, or both.
+
+    ``max_prompts`` is the size of the corpus in every mode. Under ``mixed``,
+    WikiText supplies ``wikitext_fraction`` of it and the file supplies the
+    rest; if the file holds fewer lines than its share, the shortfall is drawn
+    from WikiText so the total still lands on ``max_prompts``.
+
+    The mixed list is shuffled with ``seed`` rather than concatenated. Order is
+    irrelevant to a completed fit — :func:`jlens.fitting.fit` averages over the
+    whole list — but it decides what an *interrupted* fit averages over, since
+    resume replays the list by index. Concatenated, a fit stopped halfway would
+    have seen one source and none of the other. The shuffle is seeded because
+    that same index replay means a reshuffled list on resume would double-count
+    some prompts and skip others.
+
+    Args:
+        source: One of :data:`PROMPT_SOURCES`.
+        prompts_path: Corpus file; unused when ``source`` is ``"wikitext"``.
+        max_prompts: Total prompts to return.
+        wikitext_fraction: ``mixed`` only; share drawn from WikiText.
+        seed: Seed for the ``mixed`` shuffle.
+        wikitext_loader: Injectable for tests; defaults to the adapter's
+            streaming loader.
+    """
+    if source not in PROMPT_SOURCES:
+        raise ValueError(f"unknown prompt source {source!r}")
+    if wikitext_loader is None:
+        from jlens_inspector import adapter
+
+        wikitext_loader = adapter.load_wikitext_prompts
+
+    if source == "file":
+        assert prompts_path is not None
+        return load_prompts(prompts_path, max_prompts)
+    if source == "wikitext":
+        return wikitext_loader(max_prompts)
+
+    assert prompts_path is not None
+    n_from_file = max_prompts - round(max_prompts * wikitext_fraction)
+    file_prompts = load_prompts(prompts_path, n_from_file) if n_from_file else []
+    corpus = file_prompts + wikitext_loader(max_prompts - len(file_prompts))
+    random.Random(seed).shuffle(corpus)
+    return corpus
+
+
 def print_vram_report(hf_model) -> None:
     n_params = sum(p.numel() for p in hf_model.parameters())
     weights_gb = n_params * 2 / 1024**3  # bf16
@@ -63,6 +120,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF Hub id or local path")
     parser.add_argument("--prompts", help="text/JSONL corpus, one sequence per line")
+    parser.add_argument(
+        "--prompt-source",
+        choices=PROMPT_SOURCES,
+        default="file",
+        help="where the corpus comes from: the --prompts file, streamed "
+        "WikiText-103, or both (default: file)",
+    )
+    parser.add_argument(
+        "--wikitext-fraction",
+        type=float,
+        default=0.5,
+        help="--prompt-source mixed only: share of the corpus drawn from "
+        "WikiText-103 (default: 0.5)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="seed for the mixed-corpus shuffle; keep it fixed across resumes "
+        "of the same fit (default: 0)",
+    )
     parser.add_argument("--out", default="out/jacobian_lens.pt", help="lens output path")
     parser.add_argument(
         "--checkpoint",
@@ -94,6 +172,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.load_in_4bit or args.load_in_8bit:
         parser.error(QUANTIZED_FLAGS_MSG)
 
+    # Validate the corpus flags before the heavy adapter import below, so a bad
+    # combination fails immediately instead of after loading torch.
+    if not args.merge:
+        needs_file = args.prompt_source in ("file", "mixed")
+        if needs_file and not args.prompts:
+            parser.error(
+                f"--prompts is required for --prompt-source {args.prompt_source} "
+                "(unless --merge)"
+            )
+        if args.prompt_source == "wikitext" and args.prompts:
+            parser.error(
+                "--prompts is unused with --prompt-source wikitext; drop it, or "
+                "use --prompt-source mixed to fit on both"
+            )
+        if not 0.0 <= args.wikitext_fraction <= 1.0:
+            parser.error(
+                f"--wikitext-fraction must be between 0 and 1, got "
+                f"{args.wikitext_fraction}"
+            )
+
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -105,9 +203,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"merged {len(args.merge)} lenses ({lens.n_prompts} prompts) -> {out}")
         return 0
 
-    if not args.prompts:
-        parser.error("--prompts is required (unless --merge)")
-    prompts = load_prompts(Path(args.prompts), args.max_prompts)
+    prompts = build_corpus(
+        args.prompt_source,
+        Path(args.prompts) if args.prompts else None,
+        args.max_prompts,
+        wikitext_fraction=args.wikitext_fraction,
+        seed=args.seed,
+        wikitext_loader=adapter.load_wikitext_prompts,
+    )
+    print(f"corpus: {len(prompts)} prompts (--prompt-source {args.prompt_source})")
 
     import torch
 
