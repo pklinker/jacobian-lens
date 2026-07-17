@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jlens-inspector"
+version = "0.1.0"
+description = "Fit and apply a Jacobian lens to a local HuggingFace decoder model"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.6,<3",
+    "transformers>=5.5,<6",
+    "accelerate>=1.0",
+    "jlens",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# Only needed for --prompt-source wikitext/mixed, which streams the corpus
+# from the Hub; the default file source has no extra dependency.
+wikitext = ["datasets>=2.14"]
+
+[project.scripts]
+jlens-fit = "jlens_inspector.fit_cli:main"
+jlens-inspect = "jlens_inspector.inspection:main"
+jlens-slice = "jlens_inspector.slice_cli:main"
+
+[tool.uv.sources]
+jlens = { path = "..", editable = true }
+
+[tool.setuptools]
+packages = ["jlens_inspector"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "network: downloads a (tiny) model from the HuggingFace Hub",
+]
