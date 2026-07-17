@@ -119,8 +119,9 @@ Prints a layer x position x top-k table. The last row (marked `*`) is the
 model's actual next-token prediction; every other row is the lens readout at
 that layer. Flags: `--positions` (default `-2 -1`), `--top-k` (default 5),
 `--layers` (default all fitted layers), `--json` (emit the event record
-instead of a table). `--lens` also accepts a HuggingFace Hub repo id hosting
-a pre-fitted lens.
+instead of a table), `--out FILE` (also write the record to a file — the 3D
+viewer below can render it without reloading the model). `--lens` also
+accepts a HuggingFace Hub repo id hosting a pre-fitted lens.
 
 ### Embedding in a pipeline
 
@@ -148,6 +149,46 @@ self-contained HTML file (first run fetches d3 once, so it needs network):
 uv run python serve_slice.py --model Qwen/Qwen2.5-0.5B \
   --lens out/jacobian_lens.pt --prompt "..." --out out/slice.html
 ```
+
+## 3D layer viewer (optional)
+
+Render an interactive 3D view of the same slice: each layer is a plane
+(rows = prompt positions, columns = top-k slots) stacked by depth, with lines
+linking the same token across adjacent layers — the graph of candidates
+persisting, migrating, and dying out as the model converges on its answer.
+Output is a single self-contained HTML file (three.js inlined; the first
+build fetches it once, so it needs network):
+
+```bash
+uv run python serve_3d.py --model Qwen/Qwen2.5-0.5B \
+  --lens out/jacobian_lens.pt --prompt "..." --out out/viewer3d.html
+```
+
+In the page: drag to orbit, hover a cell for details, click a token (or use
+the search box) to trace its full-vocabulary rank trajectory through every
+layer; pin several tokens to compare them, and "sweep" animates a pass
+through the layer stack. Flags: `--top-n` (default 10), `--layer-stride`,
+`--last-n-tokens`, `--max-seq-len`, `--mask-display` (as in
+`serve_slice.py`), plus `--pin TOKEN` (repeatable) to pre-pin tokens at
+load. Very long prompts make heavy pages — the CLI warns above ~200k cells;
+window with `--last-n-tokens` or thin layers with `--layer-stride`.
+
+### Rendering a saved inspect record
+
+The viewer can also render an `inspect.py --out` record without touching the
+model — useful when the inspection ran elsewhere (a GPU box, a pipeline):
+
+```bash
+uv run python inspect.py --model M --lens L --prompt "..." --out out/record.json
+uv run python serve_3d.py --record out/record.json --out out/viewer3d.html
+```
+
+Any open viewer page can likewise load a record at runtime via its
+**import record JSON…** button (reset returns to the page's embedded data).
+Either way the record only carries top-k readouts, so rank trajectories are
+limited to top-k depth — cells and links are exact, but a token's curve
+breaks where it leaves the top-k (a full `serve_3d.py --model ...` build has
+true full-vocabulary curves).
 
 ## Tests
 

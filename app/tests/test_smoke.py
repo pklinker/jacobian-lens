@@ -102,6 +102,40 @@ def test_fit_save_reload_apply(tmp_path, tiny):
 
 
 @pytest.mark.network
+def test_render_3d_viewer_page(tmp_path, tiny):
+    """Fit a tiny lens, compute a slice, render the 3D page end-to-end.
+
+    Needs network twice: the tiny model from the Hub and the SRI-pinned
+    three.js scripts the page inlines.
+    """
+    from jlens_inspector import viewer3d
+
+    _, _, model = tiny
+    lens = adapter.fit_lens(
+        model,
+        FIT_PROMPTS[:2],
+        checkpoint_path=str(tmp_path / "ckpt3d.pt"),
+        max_seq_len=64,
+        dim_batch=8,
+    )
+    slice_data = adapter.slice_for_prompt(
+        model, lens, PROMPT, top_n=4, max_seq_len=64
+    )
+    assert slice_data.layers[-1] == model.n_layers - 1  # final layer appended
+
+    page, payload_bytes = viewer3d.build_viewer_page(
+        slice_data, PROMPT, title="smoke", description="tiny"
+    )
+    assert payload_bytes > 0
+    # single self-contained file: three.js inlined, no CDN script tags
+    assert "OrbitControls" in page
+    assert "<script src=" not in page
+    # the bootstrap carries the real prompt and context tokens
+    assert "shaped like a boot" in page
+    (tmp_path / "viewer3d.html").write_text(page, encoding="utf-8")
+
+
+@pytest.mark.network
 def test_merge_partial_lenses(tmp_path, tiny):
     _, _, model = tiny
     paths = []

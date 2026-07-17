@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#0e1116;--panel:#151a21;--line:#2b313a;--fg:#d6dce3;--dim:#8b949e;
+      --accent:#ffd54a;--final:#7ee787}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);
+     font:13px ui-monospace,Menlo,Consolas,monospace;overflow:hidden}
+#wrap{display:flex;flex-direction:column;height:100%}
+#header{display:flex;align-items:baseline;gap:10px;padding:8px 12px;
+        border-bottom:1px solid var(--line);flex:none}
+#header h1{font-size:14px;font-weight:600}
+#header .what{color:var(--dim);font-size:11px;overflow:hidden;
+              text-overflow:ellipsis;white-space:nowrap}
+#header .help{margin-left:auto;color:var(--dim);border:1px solid var(--line);
+              border-radius:50%;width:16px;height:16px;line-height:14px;
+              text-align:center;cursor:default;flex:none}
+#body{display:flex;flex:1;min-height:0}
+#stage{flex:1;position:relative;min-width:0}
+#stage canvas{display:block}
+#tt{position:absolute;pointer-events:none;background:#1c2129f2;
+    border:1px solid var(--line);border-radius:4px;padding:6px 8px;
+    font-size:11px;display:none;z-index:5;max-width:320px;line-height:1.5}
+#tt .tok{color:var(--accent)}
+#loading{position:absolute;inset:0;display:flex;align-items:center;
+         justify-content:center;color:var(--dim)}
+#panel{width:264px;flex:none;border-left:1px solid var(--line);
+       background:var(--panel);overflow-y:auto;padding:10px;display:flex;
+       flex-direction:column;gap:12px}
+.sec .h{color:var(--dim);text-transform:uppercase;font-size:10px;
+        letter-spacing:.08em;margin-bottom:6px}
+.sec label{display:flex;align-items:center;gap:6px;color:var(--fg);
+           font-size:11px;margin:4px 0 2px}
+.sec label .val{color:var(--dim);margin-left:auto}
+input[type=range]{width:100%;accent-color:var(--accent);height:18px}
+#search{width:100%;background:var(--bg);border:1px solid var(--line);
+        color:var(--fg);padding:5px 7px;border-radius:4px;font:inherit}
+#search:focus{outline:1px solid var(--accent)}
+#matches{max-height:150px;overflow-y:auto;margin-top:4px}
+#matches .m{padding:3px 6px;cursor:pointer;border-radius:3px;display:flex;gap:6px}
+#matches .m:hover{background:#232a33}
+#matches .m .id{color:var(--dim);margin-left:auto}
+#matches .m .tr{color:var(--final)}
+#selinfo{margin-top:8px;font-size:11px;line-height:1.6}
+#selinfo .tok{color:var(--accent)}
+#selinfo button{margin-top:4px}
+button{background:#232a33;border:1px solid var(--line);color:var(--fg);
+       font:inherit;font-size:11px;padding:4px 10px;border-radius:4px;
+       cursor:pointer}
+button:hover{border-color:var(--dim)}
+#pins{display:flex;flex-direction:column;gap:3px;margin-top:8px}
+#pins .p{display:flex;align-items:center;gap:6px;font-size:11px}
+#pins .sw{width:10px;height:10px;border-radius:2px;flex:none}
+#pins .x{margin-left:auto;cursor:pointer;color:var(--dim);padding:0 4px}
+#pins .x:hover{color:var(--fg)}
+#datasrc{margin-top:6px;color:var(--dim);font-size:10px;line-height:1.6}
+#datasrc .reset{cursor:pointer;color:var(--accent)}
+#legend .ramp{display:flex;height:10px;border-radius:2px;overflow:hidden;margin:4px 0}
+#legend .ramp div{flex:1}
+#legend .lab{display:flex;justify-content:space-between;color:var(--dim);font-size:10px}
+#status{color:var(--dim);font-size:10px;line-height:1.6}
+#ctx{flex:none;border-top:1px solid var(--line);padding:6px 12px;
+     white-space:nowrap;overflow-x:auto;font-size:11px;color:var(--dim)}
+#ctx span{padding:1px 1px;border-radius:2px}
+#ctx span.w{color:var(--fg)}
+#ctx span.hl{background:var(--accent);color:#000}
+.err{color:#ff7b72}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="header">
+    <h1>__TITLE__</h1><span class="what">__WHAT__</span>
+    <span class="help" title="Drag to orbit, scroll to zoom, right-drag to pan.
+Hover a token cell for details; click it to trace that token across layers.
+Lines link the same token in adjacent layers' top-k (same position).
+Traced/pinned tokens also show their full-vocab rank as a depth curve per position.
+Esc or background click clears the trace.">?</span>
+  </div>
+  <div id="body">
+    <div id="stage">
+      <div id="tt"></div>
+      <div id="loading">Loading…</div>
+    </div>
+    <div id="panel">
+      <div class="sec">
+        <div class="h">token</div>
+        <input id="search" placeholder="search tokens…" autocomplete="off" spellcheck="false">
+        <div id="matches"></div>
+        <div id="selinfo"></div>
+        <div id="pins"></div>
+      </div>
+      <div class="sec">
+        <div class="h">data</div>
+        <button id="importbtn">import record JSON&hellip;</button>
+        <input type="file" id="importfile" accept=".json,application/json" style="display:none">
+        <div id="datasrc"></div>
+      </div>
+      <div class="sec">
+        <div class="h">filters</div>
+        <label>layer min <span class="val" id="lminv"></span></label><input type="range" id="lmin">
+        <label>layer max <span class="val" id="lmaxv"></span></label><input type="range" id="lmax">
+        <label>top-k shown <span class="val" id="kmaxv"></span></label><input type="range" id="kmax">
+        <label>pos from <span class="val" id="tminv"></span></label><input type="range" id="tmin">
+        <label>pos to <span class="val" id="tmaxv"></span></label><input type="range" id="tmax">
+      </div>
+      <div class="sec">
+        <div class="h">view</div>
+        <label><input type="checkbox" id="billboard" checked> billboard text</label>
+        <label><input type="checkbox" id="edges" checked> token links</label>
+        <label><input type="checkbox" id="frames" checked> layer frames</label>
+      </div>
+      <div class="sec">
+        <div class="h">layer sweep</div>
+        <button id="play">&#9654; sweep</button>
+        <input type="range" id="sweep">
+      </div>
+      <div class="sec" id="legend">
+        <div class="h">rank</div>
+        <div class="ramp" id="ramp"></div>
+        <div class="lab"><span>1</span><span id="rampmax"></span></div>
+      </div>
+      <div class="sec" id="status"></div>
+    </div>
+  </div>
+  <div id="ctx"></div>
+</div>
+<script id="bootstrap" type="application/json">__BOOTSTRAP__</script>
+__THREE__
+<script>
+'use strict';
+(async () => {
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ------- data loading (same payload format + loader as the 2D slice page,
+// embed mode only: meta + base64 virtual filesystem of gzip'd int32 files) --
+const b64bytes = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function gunzip(bytes) {
+  const ds = new DecompressionStream('gzip');
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+}
+const i32 = u8 => new Int32Array(u8.buffer, u8.byteOffset, u8.byteLength / 4);
+
+// Imported inspect.py records live in sessionStorage (keyed per page) so a
+// full reload rebuilds the scene from them; "reset" clears the key.
+const IMPORT_KEY = 'jlens3d-import:' + location.pathname;
+
+// Convert an inspect.py --out event record to the loader's D shape. Records
+// carry only top-k readouts: rank curves get -1 (unknown) outside the top-k
+// and the page breaks trajectory lines there.
+function recordToData(record) {
+  if (!record || !record.positions || !record.layers || !record.top_k)
+    throw new Error("not an inspect.py record (expected 'positions', 'layers', 'top_k')");
+  const positions = record.positions, entries = record.layers;
+  const nT = positions.length, nL = entries.length, topn = record.top_k;
+  const ids = new Int32Array(nT * nL * topn), rks = new Int32Array(nT * nL * topn);
+  const vocab = {};
+  entries.forEach((entry, li) => {
+    const byPos = new Map(entry.readouts.map(r => [r.position, r]));
+    positions.forEach((pos, t) => {
+      ((byPos.get(pos) || {}).top_k || []).slice(0, topn).forEach((tok, k) => {
+        const i = (t * nL + li) * topn + k;
+        ids[i] = tok.id; rks[i] = tok.rank - 1;
+        vocab[String(tok.id)] = tok.token;
+      });
+    });
+  });
+  return {
+    prompt: record.prompt, T: nT, layers: entries.map(e => e.layer), top_n: topn,
+    prefix_strs: [record.prompt + '  '], ctx_strs: positions.map(p => ` [${p}]`),
+    ctx_offset: 0, tracked: [...new Set(ids)].sort((a, b) => a - b),
+    vocab, pinned: [], vocab_size: 0,
+    pos_labels: positions.map(String),
+    source: String(record.model_id || 'record') +
+            (record.lens_id ? ' · ' + record.lens_id : ''),
+    top_ids: ids, top_ranks: rks,
+    fetchRank: async tid => {
+      const R = new Int32Array(nT * nL).fill(-1);
+      for (let i = 0; i < ids.length; i++)
+        if (ids[i] === tid) R[Math.floor(i / topn)] = rks[i];
+      return R;
+    } };
+}
+
+async function loadData() {
+  const imported = sessionStorage.getItem(IMPORT_KEY);
+  if (imported !== null) {
+    try { return recordToData(JSON.parse(imported)); }
+    catch (e) { sessionStorage.removeItem(IMPORT_KEY); throw e; }
+  }
+  const boot = JSON.parse($('bootstrap').textContent);
+  if (boot.mode !== 'embed') throw new Error(`unknown mode ${boot.mode}`);
+  const meta = boot.meta;
+  const read = async name => boot.files[name] ? b64bytes(boot.files[name]) : null;
+  meta.ctx_offset = Number(meta.ctx_offset) || 0;
+  meta.prefix_strs = meta.ctx_strs.slice(0, meta.ctx_offset);
+  meta.ctx_strs = meta.ctx_strs.slice(meta.ctx_offset);
+  const N = meta.T * meta.layers.length * meta.top_n;
+  const raw = await gunzip(await read('slice.bin'));
+  return { ...meta,
+    top_ids:   new Int32Array(raw.buffer, raw.byteOffset, N),
+    top_ranks: new Int32Array(raw.buffer, raw.byteOffset + N * 4, N),
+    fetchRank: async tid => {
+      const b = await read(`ranks/${tid}.bin`);
+      return b ? i32(await gunzip(b)) : null;
+    } };
+}
+
+const stage = $('stage');
+let D;
+try { D = await loadData(); }
+catch (e) {
+  $('loading').innerHTML = `<span class="err">Load failed: ${esc(String(e))}</span>`;
+  throw e;
+}
+$('loading').remove();
+
+const T = D.T, layers = D.layers, L = layers.length, topN = D.top_n;
+const OFF = D.ctx_offset, vocab = D.vocab;
+const tracked = new Set(D.tracked);
+const finalLi = L - 1;  // compute_slice always appends the model's final layer
+const VMAX = D.vocab_size || (1 + D.top_ranks.reduce((a, b) => Math.max(a, b), 0));
+const at = (arr, t, li, k) => arr[(t * L + li) * topN + k];
+
+// tokenAt maps: per (t, li), token id -> k slot (edge matching + relevance).
+const tokenAt = [];
+for (let t = 0; t < T; t++) {
+  tokenAt[t] = [];
+  for (let li = 0; li < L; li++) {
+    const m = new Map();
+    for (let k = 0; k < topN; k++) m.set(at(D.top_ids, t, li, k), k);
+    tokenAt[t][li] = m;
+  }
+}
+
+const tokStr = tid => vocab[String(tid)] ?? `[${tid}]`;
+// Position label: record imports carry the original indices (e.g. -2, -1);
+// embedded slices label positions by absolute index in the prompt.
+const posLabel = t => D.pos_labels ? D.pos_labels[t] : String(t + OFF);
+// Display form: BPE leading/trailing spaces as ·, control chars visible.
+function dispName(tid) {
+  let s = tokStr(tid)
+    .replace(/^ +| +$/g, m => '·'.repeat(m.length))
+    .replace(/\n/g, '⏎').replace(/\r/g, '␍').replace(/\t/g, '⇥');
+  if (s === '') s = '∅';
+  return s;
+}
+
+// ------- colors -------
+const PINCOLORS = ['#e15759','#4e79a7','#76b7b2','#59a14f','#edc948','#b07aa1',
+                   '#ff9da7','#9c755f','#f28e2b','#bab0ac'];
+const lerp = (a, b, u) => a + (b - a) * u;
+function hex2rgb(h) {
+  return [parseInt(h.slice(1,3),16)/255, parseInt(h.slice(3,5),16)/255, parseInt(h.slice(5,7),16)/255];
+}
+// Full-vocab rank -> color, log scale: gold (top) -> blue -> gray (tail).
+const RAMP = [[0, '#ffd54a'], [0.35, '#f28e2b'], [0.65, '#4e79a7'], [1, '#3a4250']];
+function rankColor(rank) {
+  const u = Math.log(rank + 1) / Math.log(VMAX);
+  let i = 1;
+  while (i < RAMP.length - 1 && RAMP[i][0] < u) i++;
+  const [u0, c0] = RAMP[i-1], [u1, c1] = RAMP[i];
+  const s = Math.min(1, Math.max(0, (u - u0) / (u1 - u0)));
+  const a = hex2rgb(c0), b = hex2rgb(c1);
+  return [lerp(a[0],b[0],s), lerp(a[1],b[1],s), lerp(a[2],b[2],s)];
+}
+const css = rgb => `rgb(${rgb.map(v => Math.round(v*255)).join(',')})`;
+{ // legend ramp
+  const ramp = $('ramp');
+  for (let i = 0; i < 32; i++) {
+    const d = document.createElement('div');
+    d.style.background = css(rankColor(Math.exp(Math.log(VMAX) * i / 31) - 1));
+    ramp.appendChild(d);
+  }
+  $('rampmax').textContent = VMAX.toLocaleString();
+}
+
+// ------- text atlas: each unique display string drawn once -------
+const TILE_W = 128, TILE_H = 28, FONT = '20px ui-monospace,Menlo,Consolas,monospace';
+function buildAtlas(names) {
+  const cols = 32;
+  const rows = Math.ceil((names.length + 1) / cols);
+  const canvas = document.createElement('canvas');
+  canvas.width = cols * TILE_W;
+  canvas.height = rows * TILE_H;
+  const ctx = canvas.getContext('2d');
+  ctx.font = FONT;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';
+  const uvOf = new Map();
+  const put = (name, i) => {
+    const cx = (i % cols) * TILE_W, cy = Math.floor(i / cols) * TILE_H;
+    let s = name;
+    while (s.length > 1 && ctx.measureText(s + '…').width > TILE_W - 6) s = s.slice(0, -1);
+    if (s !== name) s += '…';
+    ctx.fillText(s, cx + 3, cy + TILE_H / 2);
+    // uv origin bottom-left; tile row r from top -> v offset from bottom
+    uvOf.set(name, [(i % cols) / cols, 1 - (Math.floor(i / cols) + 1) / rows]);
+  };
+  names.forEach((name, i) => put(name, i));
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  return { tex, uvOf, tile: [1 / cols, 1 / rows] };
+}
+
+// ------- scene -------
+const SX = 3.0, SY = 4.0, SZ = 2.2;          // position / layer / slot spacing
+const CELL_W = 2.7, CELL_H = 0.62;
+const N = T * L * topN;
+const center = new THREE.Vector3((T-1)*SX/2, (L-1)*SY/2, (topN-1)*SZ/2);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x0e1116);
+stage.appendChild(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 4000);
+// frame the grid's bounding sphere, approaching from a front-left-high corner
+const radius = 0.5 * Math.hypot(T*SX, L*SY, topN*SZ);
+const dist = radius / Math.tan(camera.fov * Math.PI / 360) * 1.15;
+const dir = new THREE.Vector3(-0.45, 0.35, 1).normalize();
+camera.position.copy(center).addScaledVector(dir, dist);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.copy(center);
+controls.enableDamping = true;
+controls.dampingFactor = 0.12;
+const scene = new THREE.Scene();
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+// --- instanced token cells ---
+// Per-instance state drives the shader: 0 hidden, 1 normal, 2 dim, 3 highlight.
+const iPos = new Float32Array(N * 3);
+const iUV = new Float32Array(N * 2);
+const iColor = new Float32Array(N * 3);
+const iState = new Float32Array(N);
+const cellT = new Int32Array(N), cellLi = new Int32Array(N),
+      cellK = new Int32Array(N), cellTid = new Int32Array(N);
+
+const names = new Set();
+for (let i = 0; i < N; i++) names.add(dispName(D.top_ids[i]));
+const atlas = buildAtlas([...names]);
+
+let idx = 0;
+for (let t = 0; t < T; t++)
+  for (let li = 0; li < L; li++)
+    for (let k = 0; k < topN; k++, idx++) {
+      const tid = at(D.top_ids, t, li, k);
+      iPos.set([t * SX, li * SY, k * SZ], idx * 3);
+      iUV.set(atlas.uvOf.get(dispName(tid)), idx * 2);
+      iColor.set(rankColor(at(D.top_ranks, t, li, k)), idx * 3);
+      iState[idx] = 1;
+      cellT[idx] = t; cellLi[idx] = li; cellK[idx] = k; cellTid[idx] = tid;
+    }
+
+const quad = new THREE.PlaneGeometry(1, 1);
+const cellGeo = new THREE.InstancedBufferGeometry();
+cellGeo.index = quad.index;
+cellGeo.setAttribute('position', quad.attributes.position);
+cellGeo.setAttribute('uv', quad.attributes.uv);
+cellGeo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
+cellGeo.setAttribute('iUV', new THREE.InstancedBufferAttribute(iUV, 2));
+cellGeo.setAttribute('iColor', new THREE.InstancedBufferAttribute(iColor, 3));
+const iStateAttr = new THREE.InstancedBufferAttribute(iState, 1);
+cellGeo.setAttribute('iState', iStateAttr);
+cellGeo.instanceCount = N;
+
+const cellMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uAtlas: { value: atlas.tex },
+    uTile: { value: new THREE.Vector2(...atlas.tile) },
+    uCell: { value: new THREE.Vector2(CELL_W, CELL_H) },
+    uBillboard: { value: 1.0 },
+  },
+  vertexShader: `
+    attribute vec3 iPos; attribute vec2 iUV; attribute vec3 iColor;
+    attribute float iState;
+    varying vec2 vUv; varying vec3 vColor; varying float vState;
+    uniform vec2 uTile; uniform vec2 uCell; uniform float uBillboard;
+    void main() {
+      vUv = iUV + uv * uTile;
+      vColor = iColor; vState = iState;
+      vec2 p = position.xy * uCell;
+      vec4 pos;
+      if (uBillboard > 0.5) {
+        vec4 mv = modelViewMatrix * vec4(iPos, 1.0);
+        mv.xy += p;
+        pos = projectionMatrix * mv;
+      } else {
+        pos = projectionMatrix * modelViewMatrix *
+              vec4(iPos + vec3(p.x, 0.0, -p.y), 1.0);
+      }
+      gl_Position = (iState < 0.5) ? vec4(2.0, 2.0, 2.0, 1.0) : pos;
+    }`,
+  fragmentShader: `
+    varying vec2 vUv; varying vec3 vColor; varying float vState;
+    uniform sampler2D uAtlas;
+    void main() {
+      float a = texture2D(uAtlas, vUv).a;
+      vec3 col = vColor;
+      if (vState > 2.5) col = mix(col, vec3(1.0), 0.45);
+      else if (vState > 1.5) a *= 0.10;
+      if (a < 0.02) discard;
+      gl_FragColor = vec4(col, a);
+    }`,
+  transparent: true,
+  depthWrite: false,
+});
+const cells = new THREE.Mesh(cellGeo, cellMat);
+cells.frustumCulled = false;
+scene.add(cells);
+
+// --- layer frames + labels ---
+const frameGroup = new THREE.Group();
+scene.add(frameGroup);
+const frameMat = new THREE.LineBasicMaterial({ color: 0x2b313a });
+const finalFrameMat = new THREE.LineBasicMaterial({ color: 0x3f5a46 });
+function labelSprite(text, color, scale) {
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  ctx.font = '28px ui-monospace,Menlo,Consolas,monospace';
+  c.width = Math.ceil(ctx.measureText(text).width) + 12;
+  c.height = 40;
+  const ctx2 = c.getContext('2d');
+  ctx2.font = '28px ui-monospace,Menlo,Consolas,monospace';
+  ctx2.textBaseline = 'middle';
+  ctx2.fillStyle = color;
+  ctx2.fillText(text, 6, 20);
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(scale * c.width / c.height, scale, 1);
+  return sp;
+}
+const mx = -SX * 1.2, Mx = (T - 1) * SX + SX * 0.6;
+const mz = -SZ * 0.8, Mz = (topN - 1) * SZ + SZ * 0.6;
+for (let li = 0; li < L; li++) {
+  const y = li * SY, isFinal = li === finalLi;
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    [mx,y,mz],[Mx,y,mz],[Mx,y,mz],[Mx,y,Mz],
+    [Mx,y,Mz],[mx,y,Mz],[mx,y,Mz],[mx,y,mz],
+  ].map(p => new THREE.Vector3(...p)));
+  frameGroup.add(new THREE.LineSegments(geo, isFinal ? finalFrameMat : frameMat));
+  const lab = labelSprite(`L${layers[li]}${isFinal ? '*' : ''}`,
+                          isFinal ? '#7ee787' : '#8b949e', 1.4);
+  lab.position.set(mx - 1.6, y, mz);
+  frameGroup.add(lab);
+}
+for (let t = 0; t < T; t += (T > 10 ? 5 : 1)) {  // position ticks, bottom frame
+  const lab = labelSprite(posLabel(t), '#5b636e', 1.1);
+  lab.position.set(t * SX, -SY * 0.45, mz);
+  frameGroup.add(lab);
+}
+
+// --- edges: same token in adjacent layers' top-k at the same position ---
+const edgeGroup = new THREE.Group();
+scene.add(edgeGroup);
+let edgeSegs = [];  // per segment: {t, li, tid, k1, k2}
+let baseEdges = null, edgeCount = 0;
+const baseEdgeMat = new THREE.LineBasicMaterial({
+  vertexColors: true, transparent: true, opacity: 0.4,
+});
+function rebuildEdges() {
+  if (baseEdges) { edgeGroup.remove(baseEdges); baseEdges.geometry.dispose(); }
+  edgeSegs = [];
+  const pos = [], col = [];
+  if (F.edges) {
+    const liHi = Math.min(F.lmax, sweepActive() ? Math.floor(sweepVal) : F.lmax);
+    for (let t = F.tmin; t <= F.tmax; t++)
+      for (let li = F.lmin; li < liHi; li++)
+        for (let k1 = 0; k1 < F.kmax; k1++) {
+          const tid = at(D.top_ids, t, li, k1);
+          const k2 = tokenAt[t][li + 1].get(tid);
+          if (k2 === undefined || k2 >= F.kmax) continue;
+          edgeSegs.push({ t, li, tid, k1, k2 });
+          pos.push(t*SX, li*SY, k1*SZ, t*SX, (li+1)*SY, k2*SZ);
+          col.push(...rankColor(at(D.top_ranks, t, li, k1)),
+                   ...rankColor(at(D.top_ranks, t, li+1, k2)));
+        }
+  }
+  edgeCount = pos.length / 6;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  baseEdges = new THREE.LineSegments(geo, baseEdgeMat);
+  edgeGroup.add(baseEdges);
+  status();
+}
+
+// --- highlight overlay + full-rank trajectories ---
+const hlGroup = new THREE.Group();
+scene.add(hlGroup);
+const rankCache = new Map(), rankFetching = new Set();
+async function ensureRank(tid) {
+  if (!tracked.has(tid) || rankCache.has(tid) || rankFetching.has(tid)) return;
+  rankFetching.add(tid);
+  try {
+    const arr = await D.fetchRank(tid);
+    if (arr) { rankCache.set(tid, arr); redrawHighlights(); }
+  } finally { rankFetching.delete(tid); }
+}
+// Full-vocab rank -> slot-axis depth (log scale, rank 1 at slot 0).
+const zOfRank = rank => Math.log(rank + 1) / Math.log(VMAX) * (topN - 1) * SZ * 1.6;
+
+function highlightList() {  // [{tid, color}] pins first, selection last (on top)
+  const out = [...pins].map(([tid, color]) => ({ tid, color }));
+  if (selected !== null && !pins.has(selected))
+    out.push({ tid: selected, color: '#ffffff' });
+  return out;
+}
+
+function redrawHighlights() {
+  for (const child of hlGroup.children) {
+    child.geometry.dispose();
+    child.material.dispose();
+  }
+  hlGroup.clear();
+  const hl = highlightList();
+  const hlSet = new Set(hl.map(h => h.tid));
+  // cell states: hidden by filters; else dim unless highlighted
+  const sweep = sweepActive() ? sweepVal : Infinity;
+  for (let i = 0; i < N; i++) {
+    const vis = cellT[i] >= F.tmin && cellT[i] <= F.tmax &&
+                cellLi[i] >= F.lmin && cellLi[i] <= F.lmax && cellK[i] < F.kmax;
+    if (!vis) { iState[i] = 0; continue; }
+    if (cellLi[i] > sweep) { iState[i] = 2; continue; }
+    if (hlSet.size === 0) { iState[i] = 1; continue; }
+    iState[i] = hlSet.has(cellTid[i]) ? 3 : 2;
+  }
+  iStateAttr.needsUpdate = true;
+  baseEdgeMat.opacity = hlSet.size ? 0.08 : 0.4;
+
+  for (const { tid, color } of hl) {
+    const mat = new THREE.LineBasicMaterial({ color });
+    // bright overlay on this token's top-k edges
+    const pos = [];
+    for (const s of edgeSegs)
+      if (s.tid === tid)
+        pos.push(s.t*SX, s.li*SY, s.k1*SZ, s.t*SX, (s.li+1)*SY, s.k2*SZ);
+    if (pos.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      hlGroup.add(new THREE.LineSegments(geo, mat));
+    }
+    // full-vocab rank trajectory per relevant position (needs the rank file)
+    const R = rankCache.get(tid);
+    if (!R) { ensureRank(tid); continue; }
+    for (let t = F.tmin; t <= F.tmax; t++) {
+      let best = Infinity;  // ranks < 0 are unknown (record imports), skip them
+      for (let li = 0; li < L; li++) {
+        const r = R[t*L + li];
+        if (r >= 0 && r < best) best = r;
+      }
+      if (best >= 500) continue;  // token never surfaces at this position
+      let pts = [];
+      const flush = () => {
+        if (pts.length > 1)
+          hlGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 })));
+        pts = [];
+      };
+      for (let li = F.lmin; li <= F.lmax; li++) {
+        if (li > sweep) break;
+        const r = R[t*L + li];
+        if (r < 0) { flush(); continue; }  // unknown: break the line here
+        pts.push(new THREE.Vector3(t*SX, li*SY, zOfRank(r)));
+      }
+      flush();
+    }
+  }
+}
+
+// ------- filters / state -------
+const F = { lmin: 0, lmax: L - 1, kmax: Math.min(5, topN), tmin: 0, tmax: T - 1,
+            edges: true };
+let selected = null;           // token id or null
+const pins = new Map();        // tid -> color
+let sweepVal = L - 1, sweeping = false, sweepOn = false;
+const sweepActive = () => sweepOn && sweepVal < L - 1 + 1e-6;
+
+function applyAll() { rebuildEdges(); redrawHighlights(); syncPanel(); }
+
+// ------- picking -------
+const ray = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tmp = new THREE.Vector3();
+let hovered = -1, mouseEvt = null;
+function pick() {
+  if (!mouseEvt) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.set(((mouseEvt.clientX - rect.left) / rect.width) * 2 - 1,
+            -((mouseEvt.clientY - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const r = ray.ray;
+  let bestI = -1, bestD = Infinity;
+  const thresh = CELL_H * CELL_H * 2.0;
+  for (let i = 0; i < N; i++) {
+    if (iState[i] < 0.5) continue;
+    tmp.set(iPos[i*3], iPos[i*3+1], iPos[i*3+2]);
+    const d = r.distanceSqToPoint(tmp);
+    if (d < thresh) {
+      const along = tmp.sub(r.origin).dot(r.direction);  // prefer nearest hit
+      if (along > 0 && along < bestD) { bestD = along; bestI = i; }
+    }
+  }
+  setHover(bestI);
+}
+const tt = $('tt');
+function setHover(i) {
+  hovered = i;
+  const ctxSpans = $('ctx').children;
+  for (const s of ctxSpans) s.classList.remove('hl');
+  if (i < 0) { tt.style.display = 'none'; stage.style.cursor = ''; return; }
+  const t = cellT[i], li = cellLi[i], k = cellK[i], tid = cellTid[i];
+  const rank = at(D.top_ranks, t, li, k) + 1;
+  const isFinal = li === finalLi;
+  const ctxLine = D.pos_labels
+    ? `&hellip;${esc(D.prompt.slice(-38))}`
+    : `after: &hellip;${esc(D.ctx_strs.slice(Math.max(0, t-6), t+1).join(''))}`;
+  tt.innerHTML =
+    `<span class="tok">${esc(JSON.stringify(tokStr(tid)))}</span> ` +
+    `<span style="color:var(--dim)">#${tid}${tracked.has(tid) ? '' : ' (untracked)'}</span><br>` +
+    `rank ${rank} &middot; layer L${layers[li]}${isFinal ? '* (model output)' : ''} ` +
+    `&middot; pos ${posLabel(t)}<br>` +
+    `<span style="color:var(--dim)">${ctxLine}</span>`;
+  tt.style.display = 'block';
+  const rect = stage.getBoundingClientRect();
+  tt.style.left = Math.max(4, Math.min(mouseEvt.clientX - rect.left + 14, rect.width - 330)) + 'px';
+  tt.style.top = (mouseEvt.clientY - rect.top + 14) + 'px';
+  stage.style.cursor = 'pointer';
+  const span = ctxSpans[t + t0Span];
+  if (span) span.classList.add('hl');
+}
+
+let downAt = null, mouseDirty = false;
+renderer.domElement.addEventListener('pointermove', e => { mouseEvt = e; mouseDirty = true; });
+renderer.domElement.addEventListener('pointerleave', () => { mouseEvt = null; setHover(-1); });
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt) return;
+  const drag = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4;
+  downAt = null;
+  if (drag || e.button !== 0) return;
+  mouseEvt = e; pick();
+  if (hovered >= 0) selectToken(cellTid[hovered]);
+  else if (selected !== null) { selected = null; applyAll(); }
+});
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && selected !== null) { selected = null; applyAll(); }
+});
+
+function selectToken(tid) {
+  selected = (selected === tid) ? null : tid;
+  if (selected !== null) ensureRank(selected);
+  applyAll();
+}
+
+// ------- panel wiring -------
+function slider(id, min, max, val, oninput) {
+  const el = $(id);
+  el.min = min; el.max = max; el.value = val; el.step = 1;
+  el.addEventListener('input', () => oninput(Number(el.value)));
+  return el;
+}
+slider('lmin', 0, L-1, F.lmin, v => { F.lmin = Math.min(v, F.lmax); applyAll(); });
+slider('lmax', 0, L-1, F.lmax, v => { F.lmax = Math.max(v, F.lmin); applyAll(); });
+slider('kmax', 1, topN, F.kmax, v => { F.kmax = v; applyAll(); });
+slider('tmin', 0, T-1, F.tmin, v => { F.tmin = Math.min(v, F.tmax); applyAll(); });
+slider('tmax', 0, T-1, F.tmax, v => { F.tmax = Math.max(v, F.tmin); applyAll(); });
+$('billboard').addEventListener('change', e => {
+  cellMat.uniforms.uBillboard.value = e.target.checked ? 1 : 0;
+});
+$('edges').addEventListener('change', e => { F.edges = e.target.checked; applyAll(); });
+$('frames').addEventListener('change', e => { frameGroup.visible = e.target.checked; });
+
+const sweepEl = slider('sweep', 0, L-1, L-1, v => {
+  sweepVal = v; sweepOn = true; sweeping = false;
+  $('play').innerHTML = '&#9654; sweep';
+  applyAll();
+});
+$('play').addEventListener('click', () => {
+  sweeping = !sweeping;
+  if (sweeping) { sweepOn = true; if (sweepVal >= L - 1) sweepVal = 0; }
+  $('play').innerHTML = sweeping ? '&#10074;&#10074; pause' : '▶ sweep';
+});
+
+function syncPanel() {
+  $('lminv').textContent = 'L' + layers[F.lmin];
+  $('lmaxv').textContent = 'L' + layers[F.lmax];
+  $('kmaxv').textContent = F.kmax;
+  $('tminv').textContent = posLabel(F.tmin);
+  $('tmaxv').textContent = posLabel(F.tmax);
+  // selection info
+  const el = $('selinfo');
+  if (selected === null) { el.innerHTML = '<span style="color:var(--dim)">click a cell or search to trace a token</span>'; }
+  else {
+    const tr = tracked.has(selected);
+    el.innerHTML =
+      `traced: <span class="tok">${esc(JSON.stringify(tokStr(selected)))}</span> #${selected}<br>` +
+      (tr ? '' : `<span style="color:var(--dim)">untracked: no full-rank curve, top-k cells only</span><br>`) +
+      `<button id="pinbtn">${pins.has(selected) ? 'unpin' : 'pin'}</button>`;
+    $('pinbtn').addEventListener('click', () => togglePin(selected));
+  }
+  // pins list
+  $('pins').innerHTML = [...pins].map(([tid, color]) =>
+    `<div class="p"><span class="sw" style="background:${color}"></span>` +
+    `<span>${esc(dispName(tid))}</span><span class="x" data-tid="${tid}">&times;</span></div>`
+  ).join('');
+  for (const x of $('pins').querySelectorAll('.x'))
+    x.addEventListener('click', () => togglePin(Number(x.dataset.tid)));
+}
+
+function togglePin(tid) {
+  if (pins.has(tid)) pins.delete(tid);
+  else {
+    const used = new Set(pins.values());
+    pins.set(tid, PINCOLORS.find(c => !used.has(c)) || PINCOLORS[pins.size % PINCOLORS.length]);
+    ensureRank(tid);
+  }
+  applyAll();
+}
+
+// search
+const vocabEntries = Object.entries(vocab).map(([id, s]) => [Number(id), s]);
+$('search').addEventListener('input', () => {
+  const q = $('search').value.toLowerCase();
+  const box = $('matches');
+  if (!q) { box.innerHTML = ''; return; }
+  const hits = vocabEntries
+    .filter(([, s]) => s.toLowerCase().includes(q))
+    .sort((a, b) => (tracked.has(b[0]) - tracked.has(a[0])) || (a[1].length - b[1].length))
+    .slice(0, 30);
+  box.innerHTML = hits.map(([tid, s]) =>
+    `<div class="m" data-tid="${tid}"><span>${esc(JSON.stringify(s))}</span>` +
+    `${tracked.has(tid) ? '<span class="tr">tracked</span>' : ''}` +
+    `<span class="id">#${tid}</span></div>`).join('') ||
+    '<div style="color:var(--dim);padding:3px 6px">no matches</div>';
+  for (const m of box.querySelectorAll('.m'))
+    m.addEventListener('mousedown', () => {
+      selected = null;  // force select (not toggle-off)
+      selectToken(Number(m.dataset.tid));
+    });
+});
+
+// import an inspect.py record: stash it per-page and reload so the whole
+// scene rebuilds from it; "reset" returns to the embedded slice
+$('importbtn').addEventListener('click', () => $('importfile').click());
+$('importfile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const record = JSON.parse(await file.text());
+    recordToData(record);  // validate before committing
+    sessionStorage.setItem(IMPORT_KEY, JSON.stringify(record));
+    location.reload();
+  } catch (err) {
+    $('datasrc').innerHTML = `<span class="err">${esc(String(err))}</span>`;
+  }
+});
+if (D.source) {
+  $('datasrc').innerHTML =
+    `imported: ${esc(D.source)}<br>(trajectories limited to top-k depth) ` +
+    `<span class="reset">&times; reset</span>`;
+  $('datasrc').querySelector('.reset').addEventListener('click', () => {
+    sessionStorage.removeItem(IMPORT_KEY);
+    location.reload();
+  });
+} else {
+  $('datasrc').textContent = 'embedded slice';
+}
+
+function status() {
+  $('status').innerHTML =
+    `${T} positions &middot; ${L} layers &middot; top-${topN}<br>` +
+    `${N.toLocaleString()} cells &middot; ${edgeCount.toLocaleString()} links &middot; ` +
+    `${tracked.size} tracked tokens`;
+}
+
+// context strip
+let t0Span = 0;
+{
+  const parts = [];
+  if (D.prefix_strs.length) {
+    parts.push(`<span>${esc(D.prefix_strs.join(''))}</span>`);
+    t0Span = 0;  // windowed tokens follow the single prefix span
+  }
+  for (let t = 0; t < T; t++) parts.push(`<span class="w">${esc(D.ctx_strs[t])}</span>`);
+  $('ctx').innerHTML = parts.join('');
+  t0Span = D.prefix_strs.length ? 1 : 0;
+  // hover fix-up in setHover indexes children as [prefix?] + windowed spans
+}
+
+// initial pins from the CLI's --pin flags
+for (const tid of (D.pinned || [])) togglePin(tid);
+
+// ------- render loop -------
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = (now - last) / 1000; last = now;
+  if (sweeping) {
+    sweepVal += dt * (L - 1) / 8;              // full sweep in ~8s
+    if (sweepVal >= L - 1) { sweepVal = L - 1; sweeping = false; sweepOn = false;
+                             $('play').innerHTML = '▶ sweep'; }
+    sweepEl.value = sweepVal;
+    applyAll();
+  }
+  if (mouseDirty) { pick(); mouseDirty = false; }
+  controls.update();
+  renderer.render(scene, camera);
+}
+applyAll();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
