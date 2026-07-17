@@ -25,12 +25,16 @@ wikitext = ["datasets>=2.14"]
 jlens-fit = "jlens_inspector.fit_cli:main"
 jlens-inspect = "jlens_inspector.inspection:main"
 jlens-slice = "jlens_inspector.slice_cli:main"
+jlens-3d = "jlens_inspector.viewer3d_cli:main"
 
 [tool.uv.sources]
 jlens = { path = "..", editable = true }
 
 [tool.setuptools]
 packages = ["jlens_inspector"]
+
+[tool.setuptools.package-data]
+jlens_inspector = ["data/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

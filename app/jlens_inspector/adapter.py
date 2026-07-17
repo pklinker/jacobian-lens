@@ -152,17 +152,23 @@ def slice_for_prompt(
     lens: JacobianLens,
     prompt: str,
     *,
+    top_n: int = 10,
     layer_stride: int = 1,
+    last_n_tokens: int | None = None,
     mask_display: bool = False,
     max_seq_len: int = 512,
+    pinned_token_ids: set[int] | None = None,
 ) -> SliceData:
     return compute_slice(
         model,
         lens,
         prompt,
+        top_n=top_n,
         layer_stride=layer_stride,
+        last_n_tokens=last_n_tokens,
         mask_display=mask_display,
         max_seq_len=max_seq_len,
+        pinned_token_ids=pinned_token_ids,
     )
 
 

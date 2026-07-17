@@ -137,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--json", action="store_true", help="print the JSON event record, not a table"
     )
+    parser.add_argument(
+        "--out",
+        default=None,
+        metavar="FILE",
+        help=(
+            "also write the JSON event record (per-layer top-k readouts) to "
+            "FILE; serve_3d.py --record renders it without reloading the model"
+        ),
+    )
     return parser
 
 
@@ -171,6 +180,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result["record"], ensure_ascii=False))
     else:
         print_table(result["record"])
+    if args.out:
+        from pathlib import Path
+
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(result["record"], ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"wrote record to {out}")
     return 0
 
 
