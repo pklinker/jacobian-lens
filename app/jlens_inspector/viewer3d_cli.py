@@ -64,6 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="render an inspect.py --out JSON record instead of running the model",
     )
+    parser.add_argument(
+        "--models-dir",
+        default="models",
+        metavar="DIR",
+        help="local model store: downloads are saved here and found here on "
+        "later runs; point at another drive if needed (default: models)",
+    )
     parser.add_argument("--out", default="out/viewer3d.html")
     parser.add_argument("--title", default="Jacobian lens 3D viewer")
     parser.add_argument(
@@ -171,7 +178,9 @@ def _slice_from_model(args) -> tuple:
     from jlens_inspector import adapter
 
     device_map = "auto" if torch.cuda.is_available() else None
-    hf_model, tokenizer = adapter.load_model(args.model, device_map=device_map)
+    hf_model, tokenizer = adapter.load_model(
+        args.model, device_map=device_map, models_dir=args.models_dir
+    )
     model = adapter.wrap(hf_model, tokenizer)
     lens = adapter.load_lens(args.lens)
 

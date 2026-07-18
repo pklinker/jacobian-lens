@@ -141,3 +141,90 @@ def test_adapter_rejects_gguf():
 
     with pytest.raises(ValueError, match="GGUF"):
         adapter.load_model("model.gguf")
+
+
+# ---- local model store (no network: transformers is stubbed out) ----------
+
+
+class _FakeHF:
+    def __init__(self):
+        self.saved_to = None
+        self.config = type("Cfg", (), {"quantization_config": None})()
+
+    def save_pretrained(self, path):
+        self.saved_to = str(path)
+
+
+class _FakeTok:
+    def __init__(self):
+        self.saved_to = None
+
+    def save_pretrained(self, path):
+        self.saved_to = str(path)
+
+
+def _stub_transformers(monkeypatch, calls):
+    from jlens_inspector import adapter
+
+    fake_hf, fake_tok = _FakeHF(), _FakeTok()
+
+    class Model:
+        @staticmethod
+        def from_pretrained(source, **kwargs):
+            calls.append(source)
+            return fake_hf
+
+    class Tok:
+        @staticmethod
+        def from_pretrained(source, **kwargs):
+            calls.append(source)
+            return fake_tok
+
+    monkeypatch.setattr(adapter.transformers, "AutoModelForCausalLM", Model)
+    monkeypatch.setattr(adapter.transformers, "AutoTokenizer", Tok)
+    return fake_hf, fake_tok
+
+
+def test_local_model_path_layout():
+    from jlens_inspector import adapter
+
+    assert str(adapter.local_model_path("Qwen/Qwen2.5-3B", "models")) == (
+        "models/Qwen--Qwen2.5-3B"
+    )
+
+
+def test_model_store_saves_first_download(tmp_path, monkeypatch):
+    from jlens_inspector import adapter
+
+    calls = []
+    fake_hf, fake_tok = _stub_transformers(monkeypatch, calls)
+    adapter.load_model("Org/Name", models_dir=tmp_path)
+    local = str(adapter.local_model_path("Org/Name", tmp_path))
+    assert calls == ["Org/Name", "Org/Name"]  # loaded from the Hub id
+    assert fake_hf.saved_to == local and fake_tok.saved_to == local
+
+
+def test_model_store_hit_skips_download_and_save(tmp_path, monkeypatch):
+    from jlens_inspector import adapter
+
+    local = adapter.local_model_path("Org/Name", tmp_path)
+    local.mkdir(parents=True)
+    (local / "config.json").write_text("{}")
+    calls = []
+    fake_hf, fake_tok = _stub_transformers(monkeypatch, calls)
+    adapter.load_model("Org/Name", models_dir=tmp_path)
+    assert calls == [str(local), str(local)]  # loaded from the store
+    assert fake_hf.saved_to is None and fake_tok.saved_to is None
+
+
+def test_explicit_local_path_bypasses_store(tmp_path, monkeypatch):
+    from jlens_inspector import adapter
+
+    checkpoint = tmp_path / "my-checkpoint"
+    checkpoint.mkdir()
+    calls = []
+    fake_hf, _ = _stub_transformers(monkeypatch, calls)
+    adapter.load_model(str(checkpoint), models_dir=tmp_path / "store")
+    assert calls == [str(checkpoint), str(checkpoint)]
+    assert fake_hf.saved_to is None
+    assert not (tmp_path / "store").exists()

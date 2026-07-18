@@ -37,6 +37,21 @@ If you pick a gated model you'll get an error telling you to run
 `huggingface-cli login` and accept the license on the model's Hub page. Do
 both, then retry.
 
+### Local model store
+
+Every entry point keeps downloaded models in a local store (`models/` by
+default, gitignored): the first run of a Hub id downloads it once and saves
+it there, and later runs load it straight from disk — no network and no Hub
+login, which also sidesteps re-auth for gated models. `--models-dir DIR`
+points the store somewhere else (e.g. a bigger drive):
+
+```bash
+uv run python inspect.py --model Qwen/Qwen2.5-3B --models-dir /Volumes/big/models ...
+```
+
+A `--model` that is an explicit local path bypasses the store entirely. To
+re-download a model, delete its `models/<org>--<name>/` directory.
+
 ## Fit (offline build step)
 
 ```bash

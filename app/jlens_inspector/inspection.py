@@ -126,6 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", required=True, help="HF Hub id or local path")
     parser.add_argument(
+        "--models-dir",
+        default="models",
+        metavar="DIR",
+        help="local model store: downloads are saved here and found here on "
+        "later runs; point at another drive if needed (default: models)",
+    )
+    parser.add_argument(
         "--lens", required=True, help="lens .pt from fit_lens.py, or a Hub repo id"
     )
     parser.add_argument("--prompt", required=True)
@@ -161,7 +168,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     from jlens_inspector import adapter
 
     device_map = "auto" if torch.cuda.is_available() else None
-    hf_model, tokenizer = adapter.load_model(args.model, device_map=device_map)
+    hf_model, tokenizer = adapter.load_model(
+        args.model, device_map=device_map, models_dir=args.models_dir
+    )
     model = adapter.wrap(hf_model, tokenizer)
     lens = adapter.load_lens(args.lens)
 

@@ -119,6 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Fit a Jacobian lens for an HF decoder model (offline build step)."
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF Hub id or local path")
+    parser.add_argument(
+        "--models-dir",
+        default="models",
+        metavar="DIR",
+        help="local model store: downloads are saved here and found here on "
+        "later runs; point at another drive if needed (default: models)",
+    )
     parser.add_argument("--prompts", help="text/JSONL corpus, one sequence per line")
     parser.add_argument(
         "--prompt-source",
@@ -217,7 +224,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     adapter.configure_logging()
     device_map = "auto" if torch.cuda.is_available() else None
-    hf_model, tokenizer = adapter.load_model(args.model, device_map=device_map)
+    hf_model, tokenizer = adapter.load_model(
+        args.model, device_map=device_map, models_dir=args.models_dir
+    )
     print_vram_report(hf_model)
     model = adapter.wrap(hf_model, tokenizer)
 

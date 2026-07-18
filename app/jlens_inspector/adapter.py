@@ -7,7 +7,9 @@ means editing exactly one file.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -26,6 +28,7 @@ __all__ = [
     "fit_lens",
     "load_lens",
     "load_model",
+    "local_model_path",
     "load_wikitext_prompts",
     "merge_lens_files",
     "render_slice_page",
@@ -56,27 +59,47 @@ def configure_logging() -> None:
     jlens.configure_logging()
 
 
+def local_model_path(model_id: str, models_dir: str | Path) -> Path:
+    """Directory in the local model store for a Hub model id."""
+    return Path(models_dir) / str(model_id).replace("/", "--")
+
+
 def load_model(
     model_id: str,
     *,
     device_map: str | None = None,
     dtype: torch.dtype = torch.bfloat16,
+    models_dir: str | Path | None = None,
 ) -> tuple[Any, Any]:
     """Load an HF-format causal LM + tokenizer in bf16, never quantized.
 
     ``device_map="auto"`` shards across available GPUs (requires accelerate);
     ``None`` leaves the model where transformers puts it (CPU).
+
+    ``models_dir`` names a local model store: a Hub id already present there
+    is loaded from disk (no network, no Hub auth), and one that isn't is
+    downloaded once and then saved into the store for later runs. Explicit
+    local paths bypass the store, and ``None`` disables it.
     """
     if str(model_id).endswith(".gguf"):
         raise ValueError(
             f"{model_id!r} is a GGUF checkpoint; jlens needs an HF-format "
             "checkpoint (Hub ID or a directory with config.json + safetensors)"
         )
+    source = str(model_id)
+    store_to: Path | None = None
+    if models_dir is not None and not os.path.isdir(source):
+        local = local_model_path(source, models_dir)
+        if (local / "config.json").exists():
+            print(f"loading {model_id} from local model store: {local}")
+            source = str(local)
+        else:
+            store_to = local
     try:
         hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_id, dtype=dtype, device_map=device_map
+            source, dtype=dtype, device_map=device_map
         )
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_id)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(source)
     except OSError as exc:
         message = str(exc).lower()
         if "gated" in message or "403" in message:
@@ -84,6 +107,15 @@ def load_model(
         raise
     if getattr(hf_model.config, "quantization_config", None) is not None:
         raise ValueError(NO_QUANTIZATION_MSG)
+    if store_to is not None:
+        # A failed save must not kill the run — the model is already loaded.
+        try:
+            store_to.mkdir(parents=True, exist_ok=True)
+            hf_model.save_pretrained(store_to)
+            tokenizer.save_pretrained(store_to)
+            print(f"stored {model_id} in local model store: {store_to}")
+        except OSError as exc:
+            print(f"warning: could not store {model_id} at {store_to}: {exc}")
     return hf_model, tokenizer
 
 
