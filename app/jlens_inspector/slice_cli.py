@@ -12,7 +12,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from jlens_inspector.inspection import MISSING_LENS_MSG
+from jlens_inspector.inspection import LENS_APPLY_FAILED_MSG, MISSING_LENS_MSG
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,14 +63,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     model = adapter.wrap(hf_model, tokenizer)
     lens = adapter.load_lens(args.lens)
 
-    slice_data = adapter.slice_for_prompt(
-        model,
-        lens,
-        args.prompt,
-        layer_stride=args.layer_stride,
-        mask_display=args.mask_display,
-        max_seq_len=args.max_seq_len,
-    )
+    try:
+        slice_data = adapter.slice_for_prompt(
+            model,
+            lens,
+            args.prompt,
+            layer_stride=args.layer_stride,
+            mask_display=args.mask_display,
+            max_seq_len=args.max_seq_len,
+        )
+    except ValueError as exc:
+        raise SystemExit(
+            LENS_APPLY_FAILED_MSG.format(
+                lens=args.lens, model=args.model, error=exc
+            )
+        ) from exc
     page = adapter.render_slice_page(
         slice_data,
         args.prompt,

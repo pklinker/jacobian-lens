@@ -132,6 +132,38 @@ class JacobianLens:
             merged[layer] = weighted_sum / n_total
         return cls(jacobians=merged, n_prompts=n_total, d_model=first.d_model)
 
+    def check_compatible(self, model: LensModel) -> None:
+        """Raise if this lens was not fitted on a model shaped like ``model``.
+
+        A lens only means anything for the model it was fitted on: ``J_l`` is
+        ``[d_model, d_model]`` and its layer indices address that model's
+        blocks. Checking both up front turns the mismatch into one actionable
+        error instead of a shape error or an ``IndexError`` from deep inside a
+        forward hook.
+
+        Args:
+            model: The model the lens is about to be applied to.
+
+        Raises:
+            ValueError: If ``d_model`` differs, or a fitted layer index is out
+                of range for ``model``.
+        """
+        if self.d_model != model.d_model:
+            raise ValueError(
+                f"lens d_model={self.d_model} but model d_model={model.d_model}: "
+                "this lens was fitted on a different model. Refit it with "
+                "fit() on this model, or load the model it was fitted on."
+            )
+        out_of_range = [l for l in self.source_layers if not 0 <= l < model.n_layers]
+        if out_of_range:
+            raise ValueError(
+                f"lens has fitted layers {out_of_range} that are out of range "
+                f"for a {model.n_layers}-layer model (fitted layers are "
+                f"{self.source_layers[0]}..{self.source_layers[-1]}): this lens "
+                "was fitted on a different model. Refit it with fit() on this "
+                "model, or load the model it was fitted on."
+            )
+
     def transport(self, residual: torch.Tensor, layer: int) -> torch.Tensor:
         """Map a residual at ``layer`` into the final-layer basis: ``J_l @ h``.
 
@@ -176,9 +208,12 @@ class JacobianLens:
             or the full sequence length when ``positions`` is ``None``.
 
         Raises:
-            ValueError: If any requested layer is out of range for the model,
-                or (with ``use_jacobian``) not in :attr:`source_layers`.
+            ValueError: If the lens was not fitted on a model shaped like
+                ``model``, if any requested layer is out of range for the
+                model, or (with ``use_jacobian``) not in
+                :attr:`source_layers`.
         """
+        self.check_compatible(model)
         if layers is None:
             layers = self.source_layers
         out_of_range = sorted(l for l in set(layers) if not 0 <= l < model.n_layers)

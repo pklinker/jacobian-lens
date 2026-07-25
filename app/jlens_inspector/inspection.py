@@ -19,6 +19,8 @@ MISSING_LENS_MSG = (
     "implicitly — run fit_lens.py first, or point --lens at a Hub repo id."
 )
 
+LENS_APPLY_FAILED_MSG = "cannot apply lens {lens!r} to model {model!r}: {error}"
+
 
 def inspect_prompt(
     model: Any,
@@ -174,17 +176,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     model = adapter.wrap(hf_model, tokenizer)
     lens = adapter.load_lens(args.lens)
 
-    result = inspect_prompt(
-        model,
-        tokenizer,
-        lens,
-        args.prompt,
-        args.positions,
-        layers=args.layers,
-        top_k=args.top_k,
-        model_id=args.model,
-        lens_id=args.lens,
-    )
+    try:
+        result = inspect_prompt(
+            model,
+            tokenizer,
+            lens,
+            args.prompt,
+            args.positions,
+            layers=args.layers,
+            top_k=args.top_k,
+            model_id=args.model,
+            lens_id=args.lens,
+        )
+    except ValueError as exc:
+        raise SystemExit(
+            LENS_APPLY_FAILED_MSG.format(
+                lens=args.lens, model=args.model, error=exc
+            )
+        ) from exc
     if args.json:
         print(json.dumps(result["record"], ensure_ascii=False))
     else:

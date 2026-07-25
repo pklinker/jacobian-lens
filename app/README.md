@@ -123,6 +123,9 @@ uv run python fit_lens.py --merge out/part_a.pt out/part_b.pt --out out/jacobian
 ## Inspect (runtime)
 
 The inspector never fits implicitly — it errors if the lens file is missing.
+A lens is tied to the model it was fitted on (its `J_l` are `d_model x
+d_model` and its layer indices address that model's blocks), so `--model`
+must name that same model; a mismatch is reported before the readout runs.
 
 ```bash
 uv run python inspect.py --model Qwen/Qwen2.5-0.5B \

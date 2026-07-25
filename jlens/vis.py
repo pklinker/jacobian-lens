@@ -223,6 +223,10 @@ def compute_slice(
             shows the whole prompt and labels positions with their absolute
             indices. ``None`` (default) renders every position.
         max_seq_len: Truncate the prompt to this many tokens.
+
+    Raises:
+        ValueError: If the lens has no fitted layers, or was fitted on a
+            model shaped differently from ``model``.
     """
     tokenizer = model.tokenizer
     pinned_token_ids = set(pinned_token_ids or ())
@@ -230,6 +234,7 @@ def compute_slice(
 
     if not lens.source_layers:
         raise ValueError("lens has no fitted layers (jacobians is empty)")
+    lens.check_compatible(model)
     fitted_layers = lens.source_layers
     layers = fitted_layers[::layer_stride]
     if fitted_layers[-1] not in layers:

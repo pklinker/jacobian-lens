@@ -228,3 +228,36 @@ def test_explicit_local_path_bypasses_store(tmp_path, monkeypatch):
     assert calls == [str(checkpoint), str(checkpoint)]
     assert fake_hf.saved_to is None
     assert not (tmp_path / "store").exists()
+
+
+# ---- lens/model mismatch (no model load: the adapter is stubbed out) ------
+
+
+def _stub_slice_failure(monkeypatch, message):
+    """Make the CLIs' model load a no-op and the slice raise ``message``."""
+    from jlens_inspector import adapter
+
+    monkeypatch.setattr(adapter, "load_model", lambda *a, **kw: (None, None))
+    monkeypatch.setattr(adapter, "wrap", lambda *a, **kw: None)
+    monkeypatch.setattr(adapter, "load_lens", lambda *a, **kw: None)
+
+    def fail(*_args, **_kwargs):
+        raise ValueError(message)
+
+    monkeypatch.setattr(adapter, "slice_for_prompt", fail)
+    monkeypatch.setattr(adapter, "apply_lens", fail)
+
+
+@pytest.mark.parametrize("module_name", ["slice_cli", "viewer3d_cli"])
+def test_slice_clis_report_a_lens_model_mismatch_cleanly(monkeypatch, module_name):
+    """A lens fitted on another model exits with the reason, not a traceback."""
+    import importlib
+
+    module = importlib.import_module(f"jlens_inspector.{module_name}")
+    _stub_slice_failure(monkeypatch, "lens d_model=1536 but model d_model=896")
+    monkeypatch.setattr(module, "pin_token_ids", lambda *a, **kw: set(), raising=False)
+    with pytest.raises(SystemExit) as excinfo:
+        module.main(["--model", "M", "--lens", "L", "--prompt", "hi"])
+    message = str(excinfo.value)
+    assert "cannot apply lens 'L' to model 'M'" in message
+    assert "d_model=1536" in message

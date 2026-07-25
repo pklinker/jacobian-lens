@@ -20,7 +20,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from jlens_inspector.inspection import MISSING_LENS_MSG
+from jlens_inspector.inspection import LENS_APPLY_FAILED_MSG, MISSING_LENS_MSG
 
 MULTI_TOKEN_PIN_MSG = (
     "--pin {text!r} does not tokenize to a single token (got {pieces}); pin "
@@ -184,17 +184,24 @@ def _slice_from_model(args) -> tuple:
     model = adapter.wrap(hf_model, tokenizer)
     lens = adapter.load_lens(args.lens)
 
-    slice_data = adapter.slice_for_prompt(
-        model,
-        lens,
-        args.prompt,
-        top_n=args.top_n,
-        layer_stride=args.layer_stride,
-        last_n_tokens=args.last_n_tokens,
-        mask_display=args.mask_display,
-        max_seq_len=args.max_seq_len,
-        pinned_token_ids=pin_token_ids(tokenizer, args.pin),
-    )
+    try:
+        slice_data = adapter.slice_for_prompt(
+            model,
+            lens,
+            args.prompt,
+            top_n=args.top_n,
+            layer_stride=args.layer_stride,
+            last_n_tokens=args.last_n_tokens,
+            mask_display=args.mask_display,
+            max_seq_len=args.max_seq_len,
+            pinned_token_ids=pin_token_ids(tokenizer, args.pin),
+        )
+    except ValueError as exc:
+        raise SystemExit(
+            LENS_APPLY_FAILED_MSG.format(
+                lens=args.lens, model=args.model, error=exc
+            )
+        ) from exc
     return slice_data, args.prompt, f"model: {args.model} - lens: {args.lens}"
 
 
